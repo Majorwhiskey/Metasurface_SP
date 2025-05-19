@@ -1,0 +1,122 @@
+clear all;
+clc;
+close all;
+
+% Rectangular antenna/element array for metasurface
+
+% Parameters
+Nx = 4; % Number of elements in the x-dimension
+Ny = 4; % Number of elements in the y-dimension
+d = 0.5; % Distance between elements in wavelengths
+lambda = 1; % Wavelength
+k = 2 * pi / lambda; % Wave number
+fs = 1e3; % Sampling frequency
+t = 0:1/fs:1; % Time vector
+A = 1; % Amplitude of the incoming signal
+
+% Create grid of element positions
+[x, y] = meshgrid(0:Nx-1, 0:Ny-1);
+x = x * d;
+y = y * d;
+
+% Generate the incoming signal (a simple sinusoidal wave in this example)
+signal = A * cos(2 * pi * 100 * t);  % Signal as a cosine wave at 100 Hz
+
+% Initialize the received signal matrix
+received_signal_data = []; % Store received signal data
+
+% Total number of iterations (reduced dataset size)
+theta_values = -90:15:90; % Reduce steps for theta
+phi_values = -90:15:90; % Reduce steps for phi
+total_iterations = length(theta_values) * length(phi_values);
+current_iteration = 0;
+
+% Loop over different theta, phi values
+for theta = theta_values
+    for phi = phi_values
+        % Update progress display
+        current_iteration = current_iteration + 1;
+        disp(['Processing: ', num2str(current_iteration), ' of ', num2str(total_iterations)]);
+        
+        % Calculate the received signal for this combination of parameters
+        received_signal = calculate_signal(theta, phi, Nx, Ny, x, y, signal, k);
+        
+        % Store the received signal data
+        received_signal_data = [received_signal_data; theta, phi, received_signal];
+    end
+end
+
+% Function to calculate the signal based on theta and phi
+function signal_out = calculate_signal(theta, phi, Nx, Ny, x, y, signal, k)
+    % Calculate Array Factor
+    Array_factor = ArrayFactor(theta, phi, Nx, Ny, x, y, k);
+    
+    % Ensure Array_factor is a scalar for multiplication with the signal
+    signal_out = Array_factor * signal; % Multiply by signal
+end
+
+% Function to calculate the Array Factor
+function Array_factor = ArrayFactor(theta, phi, Nx, Ny, x, y, k)
+    % Initialize Array Factor
+    Array_factor = 0;
+    
+    % Calculate the array factor based on the positions of the elements
+    for i = 1:Nx
+        for j = 1:Ny
+            % Calculate the phase shift for element (i,j) due to its position
+            phase_shift = k * (x(i,j) * sin(deg2rad(theta)) * cos(deg2rad(phi)) + ...
+                               y(i,j) * sin(deg2rad(theta)) * sin(deg2rad(phi)));
+            
+            % Add the contribution from this element to the array factor
+            Array_factor = Array_factor + exp(1j * phase_shift);
+        end
+    end
+end
+
+% Separate inputs and outputs (without SNR column)
+outputs = received_signal_data(:, 1:2)'; % Outputs: theta, phi (transpose for ANN format)
+inputs = received_signal_data(:, 3:end)'; % Inputs: received signals (transpose for ANN format)
+
+% Process complex inputs
+inputs_real = real(inputs);
+inputs_imag = imag(inputs);
+inputs_processed = [inputs_real; inputs_imag]; % Combine real and imaginary parts
+
+% Shuffle the data rows
+num_samples = size(inputs_processed, 2);
+shuffled_indices = randperm(num_samples);
+inputs_processed = inputs_processed(:, shuffled_indices);
+outputs = outputs(:, shuffled_indices);
+
+% Split the data into training (80%) and testing (20%)
+num_train = floor(0.8 * num_samples);
+train_inputs = inputs_processed(:, 1:num_train);
+train_outputs = outputs(:, 1:num_train);
+test_inputs = inputs_processed(:, num_train+1:end);
+test_outputs = outputs(:, num_train+1:end);
+
+% Define the network structure
+hiddenLayerSize = 200; % Reduced number of neurons
+net = feedforwardnet(hiddenLayerSize);
+
+% Configure training options
+net.trainFcn = 'trainrp'; % Resilient Backpropagation
+net.performFcn = 'mse'; % Mean Squared Error performance
+
+% Train the ANN
+[net, tr] = train(net, train_inputs, train_outputs);
+
+% Test the ANN
+predicted_outputs = net(test_inputs); % Predict outputs
+
+% Evaluate performance
+performance = perform(net, test_outputs, predicted_outputs);
+
+% Visualize Results
+figure;
+plotperform(tr); % Performance plot
+figure;
+plotregression(test_outputs, predicted_outputs); % Regression plot
+
+% Save the trained network
+save('trained_ANN.mat', 'net');

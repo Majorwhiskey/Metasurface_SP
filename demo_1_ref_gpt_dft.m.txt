@@ -1,0 +1,99 @@
+clear all;
+clc;
+close all;
+
+% Rectangular antenna/element array for metasurface
+
+% Parameters
+Nx = 4; % Number of elements in the x-dimension
+Ny = 4; % Number of elements in the y-dimension
+d = 0.5; % Distance between elements in wavelengths
+lambda = 1; % Wavelength
+k = 2 * pi / lambda; % Wave number
+fs = 1e3; % Sampling frequency
+t = 0:1/fs:1; % Time vector
+A = 1; % Amplitude of the incoming signal
+
+% Create grid of element positions
+[x, y] = meshgrid(0:Nx-1, 0:Ny-1);
+x = x * d;
+y = y * d;
+
+% Generate the incoming signal (a simple sinusoidal wave in this example)
+signal = A * cos(2 * pi * 100 * t);  % Signal as a cosine wave at 100 Hz
+
+% Initialize the received signal matrix
+received_signal_data = []; % Store received signal data
+
+% Total number of iterations (for progress display)
+total_iterations = length(-5:2:5) * length(-90:5:90) * length(-90:5:90);
+current_iteration = 0;
+
+% Loop over different SNR, theta, phi values
+for SNR = -5:2:5  % Reduce the step size for theta and phi
+    for theta = -90:5:90  % Increased step size
+        for phi = -90:5:90  % Increased step size
+            % Update progress display
+            current_iteration = current_iteration + 1;
+            disp(['Processing: ', num2str(current_iteration), ' of ', num2str(total_iterations)]);
+            
+            % Calculate the received signal for this combination of parameters
+            received_signal = calculate_signal(SNR, theta, phi, Nx, Ny, x, y, signal, k, t);
+            
+            % Store the received signal data
+            received_signal_data = [received_signal_data; SNR, theta, phi, received_signal];
+        end
+    end
+end
+
+% Function to calculate the signal based on SNR, theta, and phi
+function signal_out = calculate_signal(SNR, theta, phi, Nx, Ny, x, y, signal, k, t)
+    % Calculate Array Factor
+    Array_factor = ArrayFactor(theta, phi, Nx, Ny, x, y, k);
+    
+    % Ensure Array_factor is a scalar for multiplication with the signal
+    % Signal is a time-domain signal, so multiply it with the scalar Array_factor
+    received_signal = Array_factor * signal;  % Multiply by signal
+    
+    % Adjust received signal by the SNR (simple model)
+    noise = (1 / 10^(SNR / 10)) * randn(size(received_signal));  % Add noise based on SNR
+    signal_out = received_signal + noise;  % Add noise to the signal
+end
+
+% Function to calculate the Array Factor
+function Array_factor = ArrayFactor(theta, phi, Nx, Ny, x, y, k)
+    % Initialize Array Factor
+    Array_factor = 0;
+    
+    % Calculate the array factor based on the positions of the elements
+    for i = 1:Nx
+        for j = 1:Ny
+            % Calculate the phase shift for element (i,j) due to its position
+            phase_shift = k * (x(i,j) * sin(deg2rad(theta)) * cos(deg2rad(phi)) + ...
+                               y(i,j) * sin(deg2rad(theta)) * sin(deg2rad(phi)));
+            
+            % Add the contribution from this element to the array factor
+            Array_factor = Array_factor + exp(1j * phase_shift);
+        end
+    end
+    
+    % Normalize the Array Factor (optional, if needed)
+    % Array_factor = Array_factor / (Nx * Ny); % Uncomment if you want to normalize
+end
+
+%% DFT of the first row values
+
+% Extract the received signal of the first row (assuming time-domain signals in columns)
+first_row_signals = received_signal_data(1, 4:end);  % Extract time-domain signal
+
+% Compute DFT using fft
+dft_values = fft(first_row_signals);
+
+% Plot the magnitude of DFT
+figure;
+f = (0:length(dft_values)-1) * fs / length(dft_values); % Frequency vector
+plot(f, abs(dft_values));
+title('Magnitude Spectrum of the First Row Signal');
+xlabel('Frequency (Hz)');
+ylabel('|DFT|');
+grid on;
